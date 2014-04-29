@@ -17,50 +17,50 @@ class MyModel(models.Model):
     field1 = models.CharField(max_length=100)
 ```
 
-###### 2. Query for your objects as normal, but add `.async()` into the chain.
+###### 2. Create your queryset as normal.
 
-This now gives you a queryset which when evaluated will do so asynchronously.
-
-Note that you must add `.async()` **before** the queryset is evaluated, so for example it will be ineffective to add it after a `.count()` call.
+Note that you do not want to  evaluate the queryset yet, as that would default the point of having the async magic.
 
 ```
-queryset = MyModel.objects.filter(field1='cake').async()
+queryset = MyModel.objects.filter(field1='cake')
 ```
 
-###### 3. Cause the queryset to be evaluated, either in one of the normal ways, or with `.start()`.
+###### 3. Trigger the asynchronous database operation for whichever evaulation you require.
 
-The database operation will be done in the background, so you can continue to do other work while it is evaluating.
+There are 3 possible database operations which you can trigger:
+
+1. Fetching of results using `.start_fetch()`.  This is for when you plan to iterate over the results or call `len()` on the queryset.
+2. Fetching of the count using `start_count()`.  This is for when you plan to call `.count()` on the queryset.
+3. Fetching of the existence/non-zero-ness using `start_exists()`.  This is for when you plan to call `.exists()` on the queryset.
+
+The releveant database operation will then be started in the background, allowing your application to continue to do other work while the database operation is in progress in the background.
+
+
+###### 4. Use your queryset as normal to get the results:
+
+You can now iterate over your queryset, call `.count()`, `.exists()` or `len()` on it as normal.  If the database operation which you triggered earlier has not yet finished then it will now block (as Django normally would) until it has finished.
+
+### Examples
 
 ```
-#E.g. this:
-queryset = queryset[:10]
-#or this:
-queryset = queryset.start()
-
-do_other_things()
-```
-
-We now have a queryset which is fetching its results in the background while our application continues to do other things.
-When we are ready to iterate over the results we do so as normal:
-
-```
+queryset = MyModel.objects.filter(field1='cake')[:10].start_fetch()
+do_other_things() #This happens in parallel to the database operation
 for obj in queryset:
-    print obj.field1
+    print object
+
+queryset = MyModel.objects.filter(field1='sausage').start_count()
+do_other_things() #This happens in parallel to the database operation
+if queryset.count() > 2:
+    print "We have many sausages"
+
+queryset = MyModel.objects.filter(field1='miracle').start_exists()
+do_other_things() #This happens in parallel to the database operation
+if queryset.exists():
+    print "We have a miracle!"
 ```
 
-Note that we don't have to check if the queryset has fetched its results yet.  If it hasn't finished fetching its results by the time that we start iterating over it then it will just block until the results are fetched before iterating.
 
-###### Using count()
+## TODO
 
-Using `.count()` is slightly different because in the normal situation it would immediately return an integer.
-With Asynchrormous it returns a `lazy` object, which will only block when you start to treat it as an `int`.
-(For those not faimilar with `django.utils.functional.lazy` I recommend checking that out and using it to get a better idea of how this works.)
-
-```
-result = MyModel.objects.filter(field1='cake').aysnc().count()
-do_other_things() #we can do this while the DB operation is happening asynchronously
-
-if result > 1: #At this point, if the DB operation is not yet finished it will now block until it is.
-    print "We have objects!"
-```
-
+* Add an `async_get()` method.  If you look in `django.db.models.query.QuerySet.get` you'll see why this would be a good idea.
+* Add more examples, including calling `len()` and `bool()` on the queryset, using `.exists()` after calling `.start_fetch()` (which would work), etc.
