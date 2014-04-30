@@ -1,3 +1,4 @@
+from threading import Thread
 from django.db.models.query import QuerySet
 
 
@@ -24,16 +25,19 @@ class AsyncQuerySet(QuerySet):
         """
         self._fetch_in_progress = True
         self._fetch_all_in_thread()
+        return self
 
     def start_count(self):
         """ Like start, but only does the necessary query which would be used for .count(). """
         self._count_in_progress = True
         self._count_in_thread()
+        return self
 
     def start_exists(self):
         """ Like start, but only does the necessary query which would be used for .exists(). """
         self._existence_check_in_progress = True
         self._check_existence_in_thread()
+        return self
 
 
     ###############################################################################################
@@ -41,7 +45,7 @@ class AsyncQuerySet(QuerySet):
 
     def _fetch_all_in_thread(self):
         def run():
-            super(AsyncQuerySet, self)._fetch_all()
+            len(self)
             #self._result_cache will be set by that ^
             self._fetch_in_progress = False
         self._run_in_thread(run)
@@ -61,9 +65,7 @@ class AsyncQuerySet(QuerySet):
         self._run_in_thread(run)
 
     def _run_in_thread(self, function):
-        raise NotImplementedError()
-        #Something which I optimistically think will be as simple as:
-        threading.run(function)
+        Thread(target=function).start()
 
 
     ###############################################################################################
@@ -79,18 +81,14 @@ class AsyncQuerySet(QuerySet):
         self._wait_until_attr_is_false('_existence_check_in_progress')
 
     def _wait_for_any_to_finish(self):
-        raise NotImplementedError()
-        #Something a bit like this
-        while (
-            self._fetch_in_progress or self._count_in_progress or self._existence_check_in_progress
+        while not (
+            self._result_cache is None or self._count_result is None or self._existence_result is None
         ):
-            wait_or_check_thread_or_something()
+            pass
 
     def _wait_until_attr_is_false(self, attr):
-        raise NotImplementedError()
-        #Something like:
         while getattr(self, attr):
-            threading.poke()
+            pass
 
 
     ###############################################################################################
@@ -108,7 +106,10 @@ class AsyncQuerySet(QuerySet):
             self._fetch_in_progress or self._count_in_progress or self._existence_check_in_progress
         ):
             self._wait_for_any_to_finish()
-            return bool(self._result_cache or self._count_result or self._existence_result)
+            for attr in ('_result_cache', '_count_result', '_existence_result'):
+                result = getattr(self, attr)
+                if result is not None:
+                    return bool(result)
         return super(AsyncQuerySet, self).exists()
 
     def count(self):
@@ -117,7 +118,9 @@ class AsyncQuerySet(QuerySet):
         elif self._count_in_progress:
             self._wait_for_count_to_finish()
             return self._count_result
-        return super(AsyncQuerySet, self).count()
+        elif self._fetch_in_progress:
+            self._wait_for_fetch_to_finish()
+        return super(AsyncQuerySet, self).count() #This will use self._result_cache if possible
 
     def get(self, *args, **kwargs):
         #TODO: implement this.  It's not as simple as checking self._fetch_in_progress.
