@@ -9,12 +9,12 @@ class AsyncQuerySet(QuerySet):
 
     def __init__(self, *args, **kwargs):
         super(AsyncQuerySet, self).__init__(*args, **kwargs)
-        self._fetch_in_progress = False
-        self._count_in_progress = False
-        self._existence_check_in_progress = False
+        self._fetch_thread = None
+        self._count_thread = None
+        self._exists_thread = None
         #self._result_cache is already set as None by django anwyway
         self._count_result = None
-        self._existence_result = None
+        self._exists_result = None
 
     ###############################################################################################
     ############################################ API ##############################################
@@ -23,90 +23,67 @@ class AsyncQuerySet(QuerySet):
         """ Trigger the asynchronous evaluation of this queryset in the backgroud.
             When it's finished, self._result_cache should be populated as normal.
         """
-        self._fetch_in_progress = True
-        self._fetch_all_in_thread()
+        thread = Thread(target=self._do_fetch)
+        thread.start()
+        self._fetch_thread = thread
         return self
 
     def start_count(self):
         """ Like start, but only does the necessary query which would be used for .count(). """
-        self._count_in_progress = True
-        self._count_in_thread()
+        thread = Thread(target=self._do_count)
+        thread.start()
+        self._count_thread = thread
         return self
 
     def start_exists(self):
         """ Like start, but only does the necessary query which would be used for .exists(). """
-        self._existence_check_in_progress = True
-        self._check_existence_in_thread()
+        thread = Thread(target=self._do_exists)
+        thread.start()
+        self._exists_thread = thread
         return self
 
 
     ###############################################################################################
     ############################### ASYNC CALLS, THREADING & WAITING ##############################
 
-    def _fetch_all_in_thread(self):
-        def run():
-            len(self)
-            #self._result_cache will be set by that ^
-            self._fetch_in_progress = False
-        self._run_in_thread(run)
+    def _do_fetch(self):
+        len(self)
+        #self._result_cache will be set by that ^
 
-    def _count_in_thread(self):
-        def run():
-            result = super(AsyncQuerySet, self).count()
-            self._count_result = result
-            self._count_in_progress = False
-        self._run_in_thread(run)
+    def _do_count(self):
+        result = super(AsyncQuerySet, self).count()
+        self._count_result = result
 
-    def _check_existence_in_thread(self):
-        def run():
-            result = super(AsyncQuerySet, self).exists()
-            self._existence_result = result
-            self._existence_check_in_progress = False
-        self._run_in_thread(run)
-
-    def _run_in_thread(self, function):
-        Thread(target=function).start()
-
-
-    ###############################################################################################
-    ############################################ WAITING ##########################################
-
-    def _wait_for_fetch_to_finish(self):
-        self._wait_until_attr_is_false('_fetch_in_progress')
-
-    def _wait_for_count_to_finish(self):
-        self._wait_until_attr_is_false('_count_in_progress')
-
-    def _wait_for_existence_check_to_finish(self):
-        self._wait_until_attr_is_false('_existence_check_in_progress')
+    def _do_exists(self):
+        result = super(AsyncQuerySet, self).exists()
+        self._exists_result = result
 
     def _wait_for_any_to_finish(self):
-        while not (
-            self._result_cache is None or self._count_result is None or self._existence_result is None
-        ):
-            pass
-
-    def _wait_until_attr_is_false(self, attr):
-        while getattr(self, attr):
-            pass
+        """ Starting with the one which is most likely to be the fastest, find the first thread
+            which exists and wait for it to finish.
+        """
+        for thread in (self._exists_thread, self._count_thread, self._fetch_thread):
+            if thread:
+                thread.join()
 
 
     ###############################################################################################
     ############################ PREVENT DJANGO FROM DUPLICATING DB CALLS #########################
 
     def _fetch_all(self):
-        if self._fetch_in_progress:
-            self._wait_for_fetch_to_finish()
+        if self._fetch_thread:
+            self._fetch_thread.join() #Wait until it's done
         super(AsyncQuerySet, self)._fetch_all()
 
     def exists(self):
-        if self._existence_result is not None:
-            return self._existence_result
+        if self._exists_result is not None:
+            return self._exists_result
         elif (
-            self._fetch_in_progress or self._count_in_progress or self._existence_check_in_progress
+            #If we have any of our queries currently running
+            self._fetch_thread or self._count_thread or self._exists_thread
         ):
             self._wait_for_any_to_finish()
-            for attr in ('_result_cache', '_count_result', '_existence_result'):
+            for attr in ('_result_cache', '_count_result', '_exists_result'):
                 result = getattr(self, attr)
                 if result is not None:
                     return bool(result)
@@ -115,11 +92,11 @@ class AsyncQuerySet(QuerySet):
     def count(self):
         if self._count_result is not None:
             return self._count_result
-        elif self._count_in_progress:
-            self._wait_for_count_to_finish()
+        elif self._count_thread:
+            self._count_thread.join() #Wait for it to finish
             return self._count_result
-        elif self._fetch_in_progress:
-            self._wait_for_fetch_to_finish()
+        elif self._fetch_thread:
+            self._fetch_thread.join() #Wait for it to finish
         return super(AsyncQuerySet, self).count() #This will use self._result_cache if possible
 
     def get(self, *args, **kwargs):

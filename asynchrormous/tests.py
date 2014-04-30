@@ -52,14 +52,14 @@ class CloneTest(TestCase):
         #Check that the queryset is the right class
         self.assertEqual(qs.__class__, AsyncQuerySet)
         #Check that it is the same queryset that is having/had its results fetched, not a new clone
-        self.assertTrue(qs._fetch_in_progress or qs._result_cache is not None)
+        self.assertTrue(qs._fetch_thread or qs._result_cache is not None)
         #Ditto for start_count() and start_exists()...
         qs = AsyncModel.objects.all().start_count()
         self.assertEqual(qs.__class__, AsyncQuerySet)
-        self.assertTrue(qs._count_in_progress or qs._count_result is not None)
+        self.assertTrue(qs._count_thread or qs._count_result is not None)
         qs = AsyncModel.objects.all().start_exists()
         self.assertEqual(qs.__class__, AsyncQuerySet)
-        self.assertTrue(qs._existence_check_in_progress or qs._existence_result is not None)
+        self.assertTrue(qs._exists_thread or qs._existence_result is not None)
 
 
 
