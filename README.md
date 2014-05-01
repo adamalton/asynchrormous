@@ -33,7 +33,7 @@ There are 3 possible database operations which you can trigger:
 2. Fetching of the count using `start_count()`.  This is for when you plan to call `.count()` on the queryset.
 3. Fetching of the existence/non-zero-ness using `start_exists()`.  This is for when you plan to call `.exists()` on the queryset.
 
-The releveant database operation will then be started in the background, allowing your application to continue to do other work while the database operation is in progress.
+The relevant database operation will then be started in the background, allowing your application to continue to do other work while the database operation is in progress.
 
 
 ###### 4. Use your queryset as normal to get the results:
